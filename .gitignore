@@ -1,0 +1,19 @@
+# 게임 원본·산출물 (배포하지 않음)
+*.iso
+*.xdelta
+*.pss
+*.npy
+work/
+translation/
+# 글꼴·외부 실행 파일·이미지
+*.ttf
+*.otf
+*.exe
+*.dll
+*.png
+*.zip
+# 루트의 배포용 pnach 사본 (저장소에는 widescreen/ 에 보관)
+/SLPS-25829_EE84B8C5.pnach
+# 파이썬
+__pycache__/
+*.pyc
