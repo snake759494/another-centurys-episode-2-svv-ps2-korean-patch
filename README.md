@@ -3,7 +3,7 @@
 PS2 일본판 **アナザーセンチュリーズエピソード2 スペシャルボーカルバージョン (SLPS-25829)** 의 비공식 한글패치입니다. 이 저장소에는 제작 도구와 기술 문서만 있으며, 게임 원본·일본어 원문·번역 대본은 들어 있지 않습니다. 패치 파일은 [Releases](../../releases)에서 받으세요.
 
 ## 받는 파일
-- `ACE2_SVV_KO_v1.3.xdelta` — 한글패치(원본 ISO에 적용)
+- `ACE2_SVV_KO_v1.3.1.xdelta` — 한글패치(원본 ISO에 적용)
 - `SLPS-25829_EE84B8C5.pnach` — PCSX2용 16:9 와이드 패치(선택)
 
 ## 원본
@@ -16,9 +16,9 @@ PS2 일본판 **アナザーセンチュリーズエピソード2 スペシャ�
 
 ## 적용 방법
 ```
-xdelta3 -d -s "Another Century's Episode 2 - Special Vocal Version (Japan).iso" ACE2_SVV_KO_v1.3.xdelta "Another Century's Episode 2 - Special Vocal Version (Korean).iso"
+xdelta3 -d -s "Another Century's Episode 2 - Special Vocal Version (Japan).iso" ACE2_SVV_KO_v1.3.1.xdelta "Another Century's Episode 2 - Special Vocal Version (Korean).iso"
 ```
-(또는 xdeltaUI) → 결과 ISO SHA-256 `97f095bcb3dfe8ba3fc62d3ec8660ed8881065af045adfd856b6699b6a064281`
+(또는 xdeltaUI) → 결과 ISO SHA-256 `495e1f84a020d5335d2aa027e8127e1247dac8130b68da0c0881894382d40bc7`
 
 ## 한글화 범위
 - 텍스트 9,712문장: 미션 무전·컷신 대사, 브리핑·뉴스, 메뉴·도움말, 유닛·인물·무기 이름, 기체별 커맨드 리스트, 스태프 크레딧 + 미션 파일에 직접 박힌 대사 98문장

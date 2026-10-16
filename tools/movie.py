@@ -117,7 +117,14 @@ def process(src_path,dst_path,cfg):
         c=av.open(tmp); n=0
         for fr in c.decode(video=0): mm[n]=fr.to_ndarray(format='rgb24'); n+=1
         c.close(); os.remove(tmp); assert n==total,(n,total); mm.flush()
-    changed=np.zeros(total,bool); out_frames={}
+    changed=np.zeros(total,bool)
+    class _Store:
+        """수정 프레임을 디스크(memmap)에 보관해 메모리 사용을 줄인다"""
+        def __init__(s): s.mm=np.lib.format.open_memmap(dst_path+'.out.npy',mode='w+',dtype=np.uint8,shape=(total,H,W,3)); s.has=np.zeros(total,bool)
+        def get(s,k,d=None): return np.array(s.mm[k]) if s.has[k] else d
+        def __getitem__(s,k): return np.array(s.mm[k])
+        def __setitem__(s,k,v): s.mm[k]=v; s.has[k]=True
+    out_frames=_Store()
     jobs=make_jobs(cfg)
     if DRY: return
     for f0,f1,rects,texts,kind,jp in jobs:
@@ -127,46 +134,59 @@ def process(src_path,dst_path,cfg):
             lo=np.percentile(e,5); hi=np.percentile(e,90)
             al.append(np.clip((e-lo)/max(hi-lo,1)*1.1,0,1))
         em=event_mask(mm,f0,f1,rects,np.min(al,0)); pl={}
+        al=line_alpha(mm,f0,f1,rects,em)
         print('  구간',f0,f1,'시간축 복원',len(pl),'/',f1-f0,flush=True)
         for fi in range(f0,f1):
             fr=out_frames.get(fi)
             if fr is None: fr=np.array(mm[fi])
             out_frames[fi]=render_frame(fr,rects,texts,kind,[float(x[fi-f0]) for x in al],em,pl.get(fi),strict=True); changed[fi]=True
-    hit=[changed[first[g]:first[g+1]].any() for g in range(len(gops))]
-    runs=[];g=0
-    while g<len(gops):
-        if hit[g]:
-            h=g
-            while h+1<len(gops) and hit[h+1]: h+=1
-            runs.append((g,h)); g=h+1
-        else: g+=1
-    out=bytearray(); prev=0; qs=[]
-    for a,b in runs:
-        out+=es[prev:gops[a][0]]
-        seg=[out_frames.get(k,mm[k]) for k in range(first[a],first[b+1])]
-        budget=gops[b][1]-gops[a][0]
+    # GOP마다 따로 인코딩: GOP 개수·프레임 수·바이트 위치를 원본과 같게 유지(스트리밍 일정 보존)
+    out=bytearray(); prev=0; qs=[]; nrun=0
+    for g in range(len(gops)):
+        if not changed[first[g]:first[g+1]].any(): continue
+        out+=es[prev:gops[g][0]]
+        seg=[out_frames.get(k,mm[k]) for k in range(first[g],first[g+1])]
+        budget=gops[g][1]-gops[g][0]
         for q in Q_STEPS:
             enc=encode(seg,q)
             if len(enc)<=budget: break
-        assert len(enc)<=budget,(a,b,len(enc),budget)
+        assert len(enc)<=budget,(g,len(enc),budget)
         assert enc.count(b'\x00\x00\x01\x00')==len(seg)
-        out+=enc+b'\0'*(budget-len(enc)); prev=gops[b][1]; qs.append(q)
+        assert enc.count(b'\x00\x00\x01\xb8')==1,(g,enc.count(b'\x00\x00\x01\xb8'))
+        out+=enc+b'\0'*(budget-len(enc)); prev=gops[g][1]; qs.append(q); nrun+=1
     out+=es[prev:]; assert len(out)==len(es)
     dst=pss.put_video_es(src,bytes(out)); assert len(dst)==len(src)
     open(dst_path,'wb').write(dst)
     pv=dst_path+'_preview'; os.makedirs(pv,exist_ok=True)
     for f0,f1,bs,texts,kind,_ in jobs:
         k=(f0+f1)//2; Image.fromarray(out_frames[k]).save(os.path.join(pv,f'{k:05d}.png'))
-    print('바뀐 프레임',int(changed.sum()),'구간',len(runs),'q',qs,flush=True)
+    print('바뀐 프레임',int(changed.sum()),'GOP',nrun,'q 최대',max(qs),flush=True)
 def encode(frames,q):
     cmd=[FF,'-hide_banner','-loglevel','error','-y','-f','rawvideo','-pix_fmt','rgb24','-s','%dx%d'%(W,H),'-r','30000/1001','-i','-',
-         '-c:v','mpeg2video','-pix_fmt','yuv420p','-qscale:v',str(q),'-qmin','1','-qmax','31','-g','18','-bf','2','-flags','+cgop',
+         '-c:v','mpeg2video','-pix_fmt','yuv420p','-qscale:v',str(q),'-qmin','1','-qmax','31','-g',str(len(frames)),'-bf','2','-flags','+cgop',
          '-sc_threshold','1000000000','-intra_vlc','1','-dc','10','-maxrate','4500000','-bufsize','1441792',
          '-aspect','10:7','-seq_disp_ext','never','-f','mpeg2video','-']
     r=subprocess.run(cmd,input=b''.join(np.ascontiguousarray(f).tobytes() for f in frames),capture_output=True)
     if r.returncode: raise RuntimeError(r.stderr.decode())
     es=r.stdout
     return es[:-4] if es.endswith(b'\x00\x00\x01\xb7') else es
+def line_alpha(frames,f0,f1,rects,em):
+    """줄마다 원래 글자 화소(em)가 주변보다 얼마나 밝은지로 페이드 값(0~1)을 잰다"""
+    out=[]
+    for (y0,y1,x0,x1) in rects:
+        m=em[y0:y1,x0:x1]>0
+        if m.sum()<8: out.append(np.zeros(f1-f0)); continue
+        c=[]
+        for k in range(f0,f1):
+            g=cv2.cvtColor(np.ascontiguousarray(frames[k][max(0,y0-8):y1+8,max(0,x0-8):x1+8]),cv2.COLOR_RGB2GRAY).astype(np.float32)
+            bg=cv2.medianBlur(g.astype(np.uint8),15).astype(np.float32)
+            d=(g-bg)[y0-max(0,y0-8):y0-max(0,y0-8)+(y1-y0),x0-max(0,x0-8):x0-max(0,x0-8)+(x1-x0)]
+            c.append(float(np.maximum(d[m],0).mean()))
+        c=np.array(c); lo=np.percentile(c,3); hi=np.percentile(c,85)
+        a=np.clip((c-lo)/max(hi-lo,1e-3),0,1)
+        a=np.convolve(np.pad(a,2,mode='edge'),np.ones(5)/5,mode='valid')   # 깜빡임 완화
+        out.append(a)
+    return out
 DRY=False
 if __name__=='__main__':
     DRY='--dry' in sys.argv
